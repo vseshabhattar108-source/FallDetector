@@ -1,0 +1,134 @@
+﻿let fallDetected = false
+let impactConfirmed = false
+let orientationConfirmed = false
+let stillnessConfirmed = false
+let recoveryConfirmed = false
+
+
+let impactThreshold = 2500
+let orientationThreshold = 300
+let stillnessThreshold = 200
+let stillnessDuration = 3000
+let recoveryThreshold = 800
+let debounceTime = 2000
+let recoveryWindow = 10000
+
+
+let lastFallTime = 0
+let stillnessStart = 0
+let recoveryStart = 0
+
+
+function checkImpact(): boolean {
+  let ax = Math.abs(input.acceleration(Dimension.X))
+  let ay = Math.abs(input.acceleration(Dimension.Y))
+  let az = Math.abs(input.acceleration(Dimension.Z))
+  return ax > impactThreshold || ay > impactThreshold || az > impactThreshold
+}
+
+
+function checkOrientation(): boolean {
+  let roll = Math.abs(input.rotation(Rotation.Roll))
+  let pitch = Math.abs(input.rotation(Rotation.Pitch))
+  return roll > orientationThreshold || pitch > orientationThreshold
+}
+
+
+function checkStillness(): boolean {
+  let ax = Math.abs(input.acceleration(Dimension.X))
+  let ay = Math.abs(input.acceleration(Dimension.Y))
+  let az = Math.abs(input.acceleration(Dimension.Z))
+  return ax < stillnessThreshold && ay < stillnessThreshold && az < stillnessThreshold
+}
+
+
+function checkRecovery(): boolean {
+  let ax = Math.abs(input.acceleration(Dimension.X))
+  let ay = Math.abs(input.acceleration(Dimension.Y))
+  let az = Math.abs(input.acceleration(Dimension.Z))
+  return ax > recoveryThreshold || ay > recoveryThreshold || az > recoveryThreshold
+}
+
+
+function resetFlags() {
+  fallDetected = false
+  impactConfirmed = false
+  orientationConfirmed = false
+  stillnessConfirmed = false
+  recoveryConfirmed = false
+}
+
+
+function escalateAlert() {
+  basic.showIcon(IconNames.Skull)
+  music.playTone(262, music.beat(BeatFraction.Whole))
+  basic.pause(500)
+  music.playTone(294, music.beat(BeatFraction.Whole))
+  basic.pause(500)
+  music.playTone(330, music.beat(BeatFraction.Whole))
+  basic.pause(500)
+  basic.showString("FALL")
+}
+
+
+function showRecovery() {
+  basic.showIcon(IconNames.Happy)
+  basic.pause(1000)
+  basic.clearScreen()
+}
+
+
+basic.forever(function () {
+  let currentTime = input.runningTime()
+
+
+  // Phase 1: Detect impact
+  if (checkImpact()) {
+    if (currentTime - lastFallTime > debounceTime) {
+      impactConfirmed = true
+      lastFallTime = currentTime
+    }
+  }
+
+
+  // Phase 2: Confirm orientation instability
+  if (impactConfirmed && checkOrientation()) {
+    orientationConfirmed = true
+    stillnessStart = currentTime
+    fallDetected = true
+    escalateAlert()
+  }
+
+
+  // Phase 3: Confirm stillness
+  if (fallDetected && orientationConfirmed) {
+    if (checkStillness()) {
+      if (currentTime - stillnessStart > stillnessDuration) {
+        stillnessConfirmed = true
+        basic.showString("STILL")
+        recoveryStart = currentTime
+      }
+    } else {
+      stillnessStart = currentTime
+    }
+  }
+
+
+  // Phase 4: Monitor recovery
+  if (stillnessConfirmed && !recoveryConfirmed) {
+    if (checkRecovery()) {
+      if (currentTime - recoveryStart < recoveryWindow) {
+        recoveryConfirmed = true
+        showRecovery()
+        resetFlags()
+      }
+    }
+  }
+
+
+  // Timeout recovery window
+  if (stillnessConfirmed && currentTime - recoveryStart > recoveryWindow) {
+    basic.showString("NO RECOVERY")
+    resetFlags()
+  }
+})

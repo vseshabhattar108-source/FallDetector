@@ -1,0 +1,135 @@
+﻿#include <Wire.h>
+#include <MPU6050.h>
+
+
+MPU6050 mpu;
+
+
+const int buzzerPin = 8;
+const int ledPin = 13;
+
+
+bool fallDetected = false;
+bool impactConfirmed = false;
+bool orientationConfirmed = false;
+bool stillnessConfirmed = false;
+bool recoveryConfirmed = false;
+
+
+unsigned long lastFallTime = 0;
+unsigned long stillnessStart = 0;
+unsigned long recoveryStart = 0;
+
+
+const int impactThreshold = 25000; // raw acceleration units
+const int orientationThreshold = 30000; // raw gyro units
+const int stillnessThreshold = 3000;
+const int debounceTime = 2000;
+const int stillnessDuration = 3000;
+const int recoveryThreshold = 10000;
+const int recoveryWindow = 10000;
+
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+  mpu.initialize();
+  pinMode(buzzerPin, OUTPUT);
+  pinMode(ledPin, OUTPUT);
+}
+
+
+void loop() {
+  unsigned long currentTime = millis();
+
+
+  int16_t ax, ay, az, gx, gy, gz;
+  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+
+
+  // Phase 1: Impact detection
+  if (abs(ax) > impactThreshold || abs(ay) > impactThreshold || abs(az) > impactThreshold) {
+    if (currentTime - lastFallTime > debounceTime) {
+      impactConfirmed = true;
+      lastFallTime = currentTime;
+    }
+  }
+
+
+  // Phase 2: Orientation instability
+  if (impactConfirmed && (abs(gx) > orientationThreshold || abs(gy) > orientationThreshold)) {
+    orientationConfirmed = true;
+    stillnessStart = currentTime;
+    fallDetected = true;
+    escalateAlert();
+  }
+
+
+  // Phase 3: Stillness confirmation
+  if (fallDetected && orientationConfirmed) {
+    if (abs(ax) < stillnessThreshold && abs(ay) < stillnessThreshold && abs(az) < stillnessThreshold) {
+      if (currentTime - stillnessStart > stillnessDuration) {
+        stillnessConfirmed = true;
+        Serial.println("STILL");
+        recoveryStart = currentTime;
+      }
+    } else {
+      stillnessStart = currentTime;
+    }
+  }
+
+
+  // Phase 4: Recovery detection
+  if (stillnessConfirmed && !recoveryConfirmed) {
+    if (abs(ax) > recoveryThreshold || abs(ay) > recoveryThreshold || abs(az) > recoveryThreshold) {
+      if (currentTime - recoveryStart < recoveryWindow) {
+        recoveryConfirmed = true;
+        showRecovery();
+        resetFlags();
+      }
+    }
+  }
+
+
+  // Timeout recovery window
+  if (stillnessConfirmed && currentTime - recoveryStart > recoveryWindow) {
+    Serial.println("NO RECOVERY");
+    resetFlags();
+  }
+
+
+  delay(100);
+}
+
+
+void escalateAlert() {
+  digitalWrite(ledPin, HIGH);
+  tone(buzzerPin, 1000, 500);
+  delay(500);
+  tone(buzzerPin, 1200, 500);
+  delay(500);
+  tone(buzzerPin, 1400, 500);
+  delay(500);
+  digitalWrite(ledPin, LOW);
+  Serial.println("FALL DETECTED");
+}
+
+
+void showRecovery() {
+  digitalWrite(ledPin, HIGH);
+  tone(buzzerPin, 800, 300);
+  delay(300);
+  tone(buzzerPin, 600, 300);
+  delay(300);
+  digitalWrite(ledPin, LOW);
+  Serial.println("RECOVERY DETECTED");
+}
+
+
+void resetFlags() {
+  fallDetected = false;
+  impactConfirmed = false;
+  orientationConfirmed = false;
+  stillnessConfirmed = false;
+  recoveryConfirmed = false;
+}
